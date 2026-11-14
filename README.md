@@ -109,3 +109,27 @@ dbt run-operation copiar_stage_para_raw
 ```
 
 > O Snowflake registra os arquivos já carregados: executar de novo com os mesmos arquivos **não duplica** os dados.
+
+## Source → STG
+
+Primeira camada de transformação, feita com **models do dbt** em
+[`models/staging`](dbt_ultima_gs/models/staging). Os models leem as tabelas RAW (source) e criam
+**views** no schema `STG`:
+
+| Model | Origem | Conteúdo |
+|---|---|---|
+| `stg_leituras` | `RAW.LEITURAS_CARREGADOR` | leituras dos carregadores |
+| `stg_carregadores` | `RAW.CARREGADORES` | cadastro dos carregadores |
+
+O que muda em relação à RAW:
+
+- **Tipos corretos:** texto vira número, data ou verdadeiro/falso. As funções `try_` transformam
+  valores inválidos em nulo em vez de interromper o processamento.
+- **Padronização:** espaços removidos e textos em maiúsculas; `rele` vira `rele_ligado` (verdadeiro/falso).
+- **Sem duplicidade:** se a mesma linha for carregada mais de uma vez, fica só a carga mais recente.
+- **Testes:** `unique` e `not_null` garantem que cada leitura e cada carregador aparecem uma única vez.
+
+```powershell
+cd dbt_ultima_gs
+dbt build --select staging
+```

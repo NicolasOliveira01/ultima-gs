@@ -9,3 +9,9 @@ clean-targets: ["target", "dbt_packages"]
 
 vars:
   pasta_dados: "../csv"   # pasta dos CSVs, relativa à pasta do projeto dbt
+
+models:
+  dbt_ultima_gs:
+    staging:              # camada STG: dado limpo e tipado
+      +schema: stg
+      +materialized: view
