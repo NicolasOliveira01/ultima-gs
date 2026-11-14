@@ -1,0 +1,13 @@
+# segredos
+.env
+
+# python
+venv/
+.venv/
+__pycache__/
+
+# dbt
+target/
+dbt_packages/
+logs/
+.user.yml

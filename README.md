@@ -27,3 +27,85 @@ lógica do código do Arduino**. Na solução real, viriam dos carregadores pela
 | `csv/carregadores.csv` | cadastro dos carregadores: bairro, dono, tarifa e potência | 8 |
 
 
+## Colunas
+
+### `leituras_carregador.csv` (1 linha por ciclo do carregador)
+
+| Coluna | Descrição |
+|---|---|
+| `id_leitura` | identificador único da leitura |
+| `id_sessao` | sessão de carga (do pagamento até o fim da carga) |
+| `id_carregador` | carregador que gerou a leitura |
+| `id_usuario` | motorista que pagou pela carga |
+| `data_hora` | momento da leitura (cada ciclo = 6 min de carga simulados) |
+| `volta` | número do ciclo dentro da sessão (0 = momento do pagamento) |
+| `intervalo_ms` | tempo real desde a leitura anterior, em milissegundos |
+| `valor_pago_brl` | valor pago no app (R$); repete em todas as leituras da sessão |
+| `tarifa_kwh_brl` | preço do kWh definido pelo dono (R$) |
+| `kwh_pago` | energia comprada: valor pago ÷ tarifa |
+| `leitura_pot_adc` | valor bruto do sensor de potência (0 a 1023) |
+| `leitura_temp_adc` | valor bruto do sensor de temperatura (0 a 1023) |
+| `temperatura_c` | temperatura do conector em °C |
+| `estado` | proteção térmica: `NORMAL`, `REDUZIDO` ou `PAUSADO` |
+| `potencia_pedida_kw` | potência que o carro está puxando (kW) |
+| `potencia_entregue_kw` | potência entregue após a proteção térmica (100%, 50% ou 0) |
+| `energia_intervalo_kwh` | energia entregue neste ciclo: potência × tempo |
+| `kwh_entregue` | energia acumulada na sessão até esta leitura |
+| `led_status` | LED aceso: `VERDE`, `AMARELO` ou `VERMELHO` |
+| `rele` | `LIGADO` (energia liberada) ou `DESLIGADO` (energia cortada) |
+| `carga_concluida` | `true` na leitura em que a energia paga foi atingida |
+
+### `carregadores.csv` (1 linha por carregador)
+
+| Coluna | Descrição |
+|---|---|
+| `id_carregador` | identificador do carregador |
+| `id_dono` | dono do carregador (um dono pode ter mais de um) |
+| `bairro` / `cidade` | localização do carregador |
+| `latitude` / `longitude` | coordenadas aproximadas (para mapa) |
+| `potencia_nominal_kw` | potência máxima do carregador (7,4 ou 3,7 kW) |
+| `tarifa_kwh_brl` | preço do kWh cobrado pelo dono (R$) |
+| `data_cadastro` | data em que o carregador entrou na plataforma |
+
+# Caminho do cado
+
+## CSV → Stage
+
+Primeira etapa da ingestão: os CSVs são enviados do computador para o **stage** `ULTIMA_GS.RAW.STAGE_IOT`,
+uma área de arquivos dentro do Snowflake que funciona como "caixa de entrada". Isso simula o carregador
+enviando seus dados para a nuvem.
+
+O envio é feito pela macro dbt [`subir_arquivos_stage`](dbt_ultima_gs/macros/subir_arquivos_stage.sql),
+que executa um `PUT` para cada arquivo da pasta `csv/`. Os arquivos são compactados (`.gz`) e, se já
+existirem no stage, substituídos.
+
+```powershell
+cd dbt_ultima_gs
+dbt run-operation subir_arquivos_stage
+```
+
+Para conferir no Snowflake: `list @ultima_gs.raw.stage_iot;`
+
+> Nesta etapa os dados ainda **não estão em tabelas**: apenas os arquivos chegaram ao stage.
+
+## Stage → Source
+
+Segunda etapa da ingestão: os arquivos do stage são carregados nas tabelas da camada **RAW**
+(`RAW.LEITURAS_CARREGADOR` e `RAW.CARREGADORES`). Elas são a **source** do dbt, ou seja, o ponto de
+partida das transformações.
+
+A carga é feita pela macro [`copiar_stage_para_raw`](dbt_ultima_gs/macros/copiar_stage_para_raw.sql),
+que executa um `COPY INTO` para cada tabela. Os dados entram **exatamente como estão no CSV** (tudo
+como texto) e cada linha recebe duas colunas de auditoria:
+
+| Coluna | Conteúdo |
+|---|---|
+| `_arquivo` | arquivo de origem da linha |
+| `_carregado_em` | data e hora da carga |
+
+```powershell
+cd dbt_ultima_gs
+dbt run-operation copiar_stage_para_raw
+```
+
+> O Snowflake registra os arquivos já carregados: executar de novo com os mesmos arquivos **não duplica** os dados.

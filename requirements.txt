@@ -1,0 +1,2 @@
+# dbt + adaptador do Snowflake (já inclui o snowflake-connector-python)
+dbt-snowflake>=1.10,<2.0
