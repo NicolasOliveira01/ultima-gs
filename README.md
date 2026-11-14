@@ -133,3 +133,28 @@ O que muda em relação à RAW:
 cd dbt_ultima_gs
 dbt build --select staging
 ```
+
+## STG → INT
+
+Camada de **regras de negócio**, em [`models/intermediate`](dbt_ultima_gs/models/intermediate). O model
+`int_sessoes` agrupa as leituras da `stg_leituras` e gera **uma linha por sessão de carga** (view no schema `INT`).
+
+**Por que é necessário:** cada carga tem cerca de 50 leituras, e o valor pago se repete em todas.
+Somar a receita direto nas leituras multiplicaria o valor. Agrupando por sessão, cada carga é contada uma vez.
+
+| Coluna | Regra |
+|---|---|
+| `inicio` / `fim` / `duracao_min` | primeira e última leitura; duração em minutos de carga simulados |
+| `valor_pago_brl` | valor da sessão, contado uma única vez |
+| `kwh_pago` / `kwh_entregue` | energia comprada e energia efetivamente entregue |
+| `minutos_normal` / `minutos_reduzido` / `minutos_pausado` | tempo da carga em cada estado da proteção térmica |
+| `pct_tempo_alerta` | fração do tempo em REDUZIDO ou PAUSADO (0 a 1) |
+| `qtd_pausas` | quantas vezes a carga **entrou** em PAUSADO (eventos de superaquecimento) |
+| `temperatura_max_c` / `temperatura_media_c` | temperatura máxima e média do conector na carga |
+| `kwh_excedente` | energia entregue além da paga (o último ciclo passa um pouco do limite) |
+| `status_sessao` | `CONCLUIDA` ou `EM_ANDAMENTO` |
+
+```powershell
+cd dbt_ultima_gs
+dbt build --select intermediate
+```
