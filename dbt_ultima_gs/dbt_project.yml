@@ -1,0 +1,11 @@
+name: 'dbt_ultima_gs'
+version: '1.0.0'
+profile: 'dbt_ultima_gs'
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+vars:
+  pasta_dados: "../csv"   # pasta dos CSVs, relativa à pasta do projeto dbt
