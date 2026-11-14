@@ -1,0 +1,9 @@
+id_carregador,id_dono,bairro,cidade,latitude,longitude,potencia_nominal_kw,tarifa_kwh_brl,data_cadastro
+CARR-001,D001,Pinheiros,São Paulo,-23.567,-46.693,7.4,1.80,2026-06-12
+CARR-002,D002,Vila Mariana,São Paulo,-23.589,-46.634,7.4,1.50,2026-07-03
+CARR-003,D003,Moema,São Paulo,-23.601,-46.665,7.4,1.90,2026-07-21
+CARR-004,D004,Tatuapé,São Paulo,-23.54,-46.576,7.4,1.40,2026-08-02
+CARR-005,D005,Santana,São Paulo,-23.502,-46.625,3.7,1.30,2026-08-15
+CARR-006,D006,Butantã,São Paulo,-23.571,-46.708,3.7,1.35,2026-09-01
+CARR-007,D007,Itaim Bibi,São Paulo,-23.585,-46.68,7.4,1.70,2026-09-10
+CARR-008,D001,Mooca,São Paulo,-23.559,-46.599,7.4,1.50,2026-10-15
