@@ -19,3 +19,6 @@ models:
     intermediate:         # camada INT: regras de negócio
       +schema: int
       +materialized: view
+    final:                # camada FINAL: tabelas para o Power BI
+      +schema: final
+      +materialized: table

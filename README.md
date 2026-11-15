@@ -158,3 +158,44 @@ Somar a receita direto nas leituras multiplicaria o valor. Agrupando por sessão
 cd dbt_ultima_gs
 dbt build --select intermediate
 ```
+
+## INT → FINAL
+
+Camada consumida pelo **Power BI**, em [`models/final`](dbt_ultima_gs/models/final). Os dados são
+organizados em **tabelas fato e dimensão** (modelo estrela), criadas como **tabelas** no schema `FINAL`
+para o dashboard consultar mais rápido.
+
+| Tabela | Tipo | 1 linha por | Uso no dashboard |
+|---|---|---|---|
+| `fato_sessoes` | fato | carga | receita, ticket médio, duração, pausas e tempo em alerta |
+| `fato_leituras` | fato | ciclo do carregador | temperatura e estado ao longo do tempo |
+| `dim_carregador` | dimensão | carregador | filtros por carregador, bairro e dono |
+| `dim_data` | dimensão | dia | filtros por dia, semana e mês; funções de tempo no DAX |
+
+```
+                ┌──────────────┐
+                │   dim_data   │
+                └──────────────┘
+                  1 │      │ 1
+          ┌─────────┘      └─────────┐
+        N │                          │ N
+┌──────────────┐               ┌──────────────┐
+│ fato_sessoes │               │ fato_leituras│
+└──────────────┘               └──────────────┘
+        N │                          │ N
+          └─────────┐      ┌─────────┘
+                  1 │      │ 1
+              ┌──────────────────┐
+              │  dim_carregador  │
+              └──────────────────┘
+```
+
+- O **valor pago fica só na `fato_sessoes`**. Na `fato_leituras` ele se repetiria e duplicaria a receita.
+- As fatos têm `data` (para ligar com o calendário) e `hora` (para análise por horário).
+- A `dim_data` traz nome do mês, dia da semana e indicador de fim de semana em português.
+- **Testes** garantem chaves únicas e que todo carregador, data e sessão das fatos existe na tabela relacionada.
+
+```powershell
+cd dbt_ultima_gs
+dbt build --select final
+```
