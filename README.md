@@ -16,6 +16,26 @@ carga quando o valor pago é atingido e **reduz ou pausa a carga se o conector s
 - **o dono:** acompanhar faturamento e horários de maior uso;
 - **a plataforma:** identificar carregadores com superaquecimento que precisam de manutenção.
 
+# Uso de IA generativa
+
+| Ferramenta | Para quê |
+|---|---|
+| **Claude** (Anthropic) | apoio no desenvolvimento e na documentação desta área |
+
+**Como foi usada:**
+
+- **Explicação de conceitos:** camadas de dados (RAW, STG, INT, FINAL), stage e `COPY INTO` no Snowflake,
+  dbt (macros, models, testes), modelo estrela e medidas DAX.
+- **Geração e revisão de código:** script dos dados simulados, script de setup do Snowflake, macros e
+  models do dbt e medidas DAX do Power BI.
+- **Apoio no dashboard:** sugestões de visuais, layout e formatação.
+- **Documentação:** estrutura e revisão do texto deste README.
+
+**Revisão e validação:** o projeto foi construído etapa por etapa. Cada parte do código foi explicada,
+revisada e executada pelo aluno no Snowflake, no dbt e no Power BI, e os resultados foram conferidos
+(contagem de linhas, testes do dbt e valores do dashboard) antes de seguir para a etapa seguinte.
+
+
 ## Origem dos dados
 
 Os dados são **simulados (mock)**, pois o Tinkercad não se conecta à internet. Eles seguem **a mesma
@@ -245,23 +265,17 @@ para o dashboard consultar mais rápido.
 | `dim_carregador` | dimensão | carregador | filtros por carregador, bairro e dono |
 | `dim_data` | dimensão | dia | filtros por dia, semana e mês; funções de tempo no DAX |
 
-```
-                ┌──────────────┐
-                │   dim_data   │
-                └──────────────┘
-                  1 │      │ 1
-          ┌─────────┘      └─────────┐
-        N │                          │ N
-┌──────────────┐               ┌──────────────┐
-│ fato_sessoes │               │ fato_leituras│
-└──────────────┘               └──────────────┘
-        N │                          │ N
-          └─────────┐      ┌─────────┘
-                  1 │      │ 1
-              ┌──────────────────┐
-              │  dim_carregador  │
-              └──────────────────┘
-```
+![Modelagem](img/modelagem.png)
+
+| Relacionamento | Cardinalidade | Coluna |
+|---|---|---|
+| `dim_data` → `fato_sessoes` | 1 → * | `data` |
+| `dim_data` → `fato_leituras` | 1 → * | `data` |
+| `dim_carregador` → `fato_sessoes` | 1 → * | `id_carregador` |
+| `dim_carregador` → `fato_leituras` | 1 → * | `id_carregador` |
+
+As dimensões filtram as fatos em **direção única**, e **não há relacionamento entre as duas fatos**:
+assim cada filtro chega às tabelas por um único caminho, sem ambiguidade.
 
 - O **valor pago fica só na `fato_sessoes`**. Na `fato_leituras` ele se repetiria e duplicaria a receita.
 - As fatos têm `data` (para ligar com o calendário) e `hora` (para análise por horário).
@@ -291,7 +305,57 @@ cd dbt_ultima_gs
 dbt build --select final
 ```
 
-## Como executar
+# Dashboard (Power BI)
+
+Arquivo: [`ultima_gs.pbix`](ultima_gs.pbix). Os dados das tabelas `FINAL` foram carregados em **modo
+Importar**, então o dashboard abre sem acesso ao Snowflake. As duas páginas têm filtros de **período** e
+**carregador**, sincronizados entre si.
+
+## Página 1 · Receita e uso (para o dono)
+
+![Receita e uso](img/receita%20e%20uso%20%28para%20o%20dono%29.png)
+
+| Visual | Decisão que apoia |
+|---|---|
+| Cartões: receita, cargas, ticket médio e energia entregue | como está o negócio no período |
+| Mapa de calor: cargas por dia da semana × hora | em que horários há mais demanda (ex.: noites de dias úteis) |
+| Receita por carregador | quais carregadores e regiões faturam mais |
+
+## Página 2 · Saúde dos carregadores (para a plataforma)
+
+![Saúde dos carregadores](img/saude%20dos%20carregadores.png)
+
+| Visual | Decisão que apoia |
+|---|---|
+| Cartões: carregadores em alerta, pausas, temperatura máxima e média | existe risco de segurança? |
+| % do tempo em alerta por carregador (cores dos LEDs do carregador) | qual carregador precisa de manutenção primeiro |
+| Temperatura média semanal, com os limites de 45 °C e 60 °C | o defeito está piorando? |
+
+**Leitura:** o **CARR-004 (Tatuapé)** passa 79% do tempo em alerta, concentra as 59 pausas por
+superaquecimento e tem a temperatura subindo semana a semana, de ~37 °C para ~54 °C: é o candidato à
+manutenção. O **CARR-007 (Itaim Bibi)** opera perto do limite de redução (45 °C), em atenção.
+
+## Medidas DAX
+
+| Medida | O que calcula | Funções |
+|---|---|---|
+| `Receita` | soma do valor pago (uma linha por sessão) | `SUM` |
+| `Cargas` | quantidade de sessões de carga | `COUNTROWS` |
+| `Ticket Médio` | receita ÷ cargas | `DIVIDE` |
+| `Energia Entregue` | energia total entregue (kWh) | `SUM` |
+| `% Tempo em Alerta` | (minutos em REDUZIDO + PAUSADO) ÷ duração total | `DIVIDE`, `SUM` |
+| `Pausas` | eventos de superaquecimento | `SUM` |
+| `Temperatura Média` / `Máxima` | temperatura do conector nas leituras | `AVERAGE`, `MAX` |
+| `Carregadores em Alerta` | carregadores com mais de 10% do tempo em alerta | `COUNTROWS`, `FILTER`, `VALUES` |
+| `Cor Alerta` | cor de cada barra: vermelho (> 50%), amarelo (> 10%), verde | `SWITCH(TRUE())` |
+| `Receita Ranking` | receita de cada carregador ignorando o filtro de carregador (mantém o ranking completo) | `CALCULATE`, `REMOVEFILTERS`, `TREATAS` |
+| `Cor Barra Carregador` | destaca no ranking o carregador selecionado no filtro | `VAR`, `SELECTEDVALUE`, `ISFILTERED` |
+| Medidas "(cartão)" | valores formatados para os cartões (R$, kWh) | `FORMAT` |
+
+Também foi criada a coluna `Início da Semana` na `dim_data` (`data − WEEKDAY(data, 2) + 1`), usada para
+agrupar a temperatura por semana.
+
+# Como executar
 
 **Pré-requisitos:** Python 3.10+ e uma conta Snowflake.
 
@@ -342,22 +406,3 @@ dbt build                                # RAW → STG → INT → FINAL + teste
 ```
 
 Ao final, as tabelas do schema `ULTIMA_GS.FINAL` estão prontas para o Power BI.
-
-## Uso de IA generativa
-
-| Ferramenta | Para quê |
-|---|---|
-| **Claude** (Anthropic) | apoio no desenvolvimento e na documentação desta área |
-
-**Como foi usada:**
-
-- **Explicação de conceitos:** camadas de dados (RAW, STG, INT, FINAL), stage e `COPY INTO` no Snowflake,
-  dbt (macros, models, testes), modelo estrela e medidas DAX.
-- **Geração e revisão de código:** script dos dados simulados, script de setup do Snowflake, macros e
-  models do dbt e medidas DAX do Power BI.
-- **Apoio no dashboard:** sugestões de visuais, layout e formatação.
-- **Documentação:** estrutura e revisão do texto deste README.
-
-**Revisão e validação:** o projeto foi construído etapa por etapa. Cada parte do código foi explicada,
-revisada e executada pelo aluno no Snowflake, no dbt e no Power BI, e os resultados foram conferidos
-(contagem de linhas, testes do dbt e valores do dashboard) antes de seguir para a etapa seguinte.
