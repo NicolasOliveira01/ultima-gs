@@ -342,3 +342,22 @@ dbt build                                # RAW → STG → INT → FINAL + teste
 ```
 
 Ao final, as tabelas do schema `ULTIMA_GS.FINAL` estão prontas para o Power BI.
+
+## Uso de IA generativa
+
+| Ferramenta | Para quê |
+|---|---|
+| **Claude** (Anthropic) | apoio no desenvolvimento e na documentação desta área |
+
+**Como foi usada:**
+
+- **Explicação de conceitos:** camadas de dados (RAW, STG, INT, FINAL), stage e `COPY INTO` no Snowflake,
+  dbt (macros, models, testes), modelo estrela e medidas DAX.
+- **Geração e revisão de código:** script dos dados simulados, script de setup do Snowflake, macros e
+  models do dbt e medidas DAX do Power BI.
+- **Apoio no dashboard:** sugestões de visuais, layout e formatação.
+- **Documentação:** estrutura e revisão do texto deste README.
+
+**Revisão e validação:** o projeto foi construído etapa por etapa. Cada parte do código foi explicada,
+revisada e executada pelo aluno no Snowflake, no dbt e no Power BI, e os resultados foram conferidos
+(contagem de linhas, testes do dbt e valores do dashboard) antes de seguir para a etapa seguinte.
