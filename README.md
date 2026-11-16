@@ -1,4 +1,4 @@
-# ultima-gs · Big Data e visualização
+# wattly · Big Data e visualização
 
 Global Solution 2026/2 · CitizenTech
 
@@ -91,18 +91,18 @@ lógica do código do Arduino**. Na solução real, viriam dos carregadores pela
 
 ## CSV → Stage
 
-Primeira etapa da ingestão: os CSVs são enviados do computador para o **stage** `ULTIMA_GS.RAW.STAGE_IOT`,
+Primeira etapa da ingestão: os CSVs são enviados do computador para o **stage** `WATTLY.RAW.STAGE_IOT`,
 uma área de arquivos dentro do Snowflake que funciona como "caixa de entrada". Isso simula o carregador
 enviando seus dados para a nuvem.
 
-O envio é feito pela macro dbt [`subir_arquivos_stage`](dbt_ultima_gs/macros/subir_arquivos_stage.sql),
+O envio é feito pela macro dbt [`subir_arquivos_stage`](dbt_wattly/macros/subir_arquivos_stage.sql),
 que executa um `PUT` para cada arquivo da pasta `csv/`. Os arquivos são compactados (`.gz`) e, se já
 existirem no stage, substituídos.
 
 **Como funciona no código:**
 
 ```sql
-put 'file://../csv/leituras_carregador.csv' @ultima_gs.raw.stage_iot
+put 'file://../csv/leituras_carregador.csv' @wattly.raw.stage_iot
     auto_compress = true   -- compacta em .gz antes de enviar
     overwrite     = true   -- substitui o arquivo se ele já estiver no stage
 ```
@@ -112,11 +112,11 @@ put 'file://../csv/leituras_carregador.csv' @ultima_gs.raw.stage_iot
 - O status de cada envio (`UPLOADED` ou `SKIPPED`) é exibido no terminal com `log`.
 
 ```powershell
-cd dbt_ultima_gs
+cd dbt_wattly
 dbt run-operation subir_arquivos_stage
 ```
 
-Para conferir no Snowflake: `list @ultima_gs.raw.stage_iot;`
+Para conferir no Snowflake: `list @wattly.raw.stage_iot;`
 
 > Nesta etapa os dados ainda **não estão em tabelas**: apenas os arquivos chegaram ao stage.
 
@@ -126,7 +126,7 @@ Segunda etapa da ingestão: os arquivos do stage são carregados nas tabelas da 
 (`RAW.LEITURAS_CARREGADOR` e `RAW.CARREGADORES`). Elas são a **source** do dbt, ou seja, o ponto de
 partida das transformações.
 
-A carga é feita pela macro [`copiar_stage_para_raw`](dbt_ultima_gs/macros/copiar_stage_para_raw.sql),
+A carga é feita pela macro [`copiar_stage_para_raw`](dbt_wattly/macros/copiar_stage_para_raw.sql),
 que executa um `COPY INTO` para cada tabela. Os dados entram **exatamente como estão no CSV** (tudo
 como texto) e cada linha recebe duas colunas de auditoria:
 
@@ -138,14 +138,14 @@ como texto) e cada linha recebe duas colunas de auditoria:
 **Como funciona no código:**
 
 ```sql
-copy into ultima_gs.raw.leituras_carregador
+copy into wattly.raw.leituras_carregador
 from (
     select $1, $2, ..., $21,     -- colunas do CSV pela posição
            metadata$filename,    -- vai para _arquivo
            current_timestamp()   -- vai para _carregado_em
-    from @ultima_gs.raw.stage_iot
+    from @wattly.raw.stage_iot
 )
-file_format = (format_name = 'ultima_gs.raw.ff_csv')   -- vírgula, cabeçalho, UTF-8
+file_format = (format_name = 'wattly.raw.ff_csv')   -- vírgula, cabeçalho, UTF-8
 pattern     = '.*leituras_carregador.*'                -- só o arquivo desta tabela
 ```
 
@@ -154,7 +154,7 @@ pattern     = '.*leituras_carregador.*'                -- só o arquivo desta ta
 - O resultado de cada carga (arquivo, status e linhas carregadas) é exibido no terminal.
 
 ```powershell
-cd dbt_ultima_gs
+cd dbt_wattly
 dbt run-operation copiar_stage_para_raw
 ```
 
@@ -163,7 +163,7 @@ dbt run-operation copiar_stage_para_raw
 ## Source → STG
 
 Primeira camada de transformação, feita com **models do dbt** em
-[`models/staging`](dbt_ultima_gs/models/staging). Os models leem as tabelas RAW (source) e criam
+[`models/staging`](dbt_wattly/models/staging). Os models leem as tabelas RAW (source) e criam
 **views** no schema `STG`:
 
 | Model | Origem | Conteúdo |
@@ -198,13 +198,13 @@ qualify row_number() over (partition by id_leitura order by _carregado_em desc) 
 - O schema `STG` vem do `dbt_project.yml` (`+schema: stg`). A macro `generate_schema_name` faz o dbt usar esse nome exato, em vez de `RAW_STG`.
 
 ```powershell
-cd dbt_ultima_gs
+cd dbt_wattly
 dbt build --select staging
 ```
 
 ## STG → INT
 
-Camada de **regras de negócio**, em [`models/intermediate`](dbt_ultima_gs/models/intermediate). O model
+Camada de **regras de negócio**, em [`models/intermediate`](dbt_wattly/models/intermediate). O model
 `int_sessoes` agrupa as leituras da `stg_leituras` e gera **uma linha por sessão de carga** (view no schema `INT`).
 
 **Por que é necessário:** cada carga tem cerca de 50 leituras, e o valor pago se repete em todas.
@@ -248,13 +248,13 @@ div0(minutos_reduzido + minutos_pausado, duracao_min) as pct_tempo_alerta
 - `ref('stg_leituras')` cria a dependência: o dbt sempre executa a STG antes da INT.
 
 ```powershell
-cd dbt_ultima_gs
+cd dbt_wattly
 dbt build --select intermediate
 ```
 
 ## INT → FINAL
 
-Camada consumida pelo **Power BI**, em [`models/final`](dbt_ultima_gs/models/final). Os dados são
+Camada consumida pelo **Power BI**, em [`models/final`](dbt_wattly/models/final). Os dados são
 organizados em **tabelas fato e dimensão** (modelo estrela), criadas como **tabelas** no schema `FINAL`
 para o dashboard consultar mais rápido.
 
@@ -301,13 +301,13 @@ where dateadd(day, n, data_inicio) <= data_fim
 - Os testes `relationships` (em `_final_models.yml`) conferem que toda chave das fatos existe na dimensão correspondente.
 
 ```powershell
-cd dbt_ultima_gs
+cd dbt_wattly
 dbt build --select final
 ```
 
 # Dashboard (Power BI)
 
-Arquivo: [`ultima_gs.pbix`](ultima_gs.pbix). Os dados das tabelas `FINAL` foram carregados em **modo
+Arquivo: [`wattly.pbix`](wattly.pbix). Os dados das tabelas `FINAL` foram carregados em **modo
 Importar**, então o dashboard abre sem acesso ao Snowflake. As duas páginas têm filtros de **período** e
 **carregador**, sincronizados entre si.
 
@@ -362,10 +362,10 @@ Há duas formas de avaliar esta área. A **opção A** não precisa de instalaç
 
 ## Opção A · Ver o resultado sem Snowflake
 
-O arquivo [`ultima_gs.pbix`](ultima_gs.pbix) contém os dados da camada FINAL (modo **Importar**).
+O arquivo [`wattly.pbix`](wattly.pbix) contém os dados da camada FINAL (modo **Importar**).
 
 1. Instale o **Power BI Desktop** (gratuito, na Microsoft Store).
-2. Abra o `ultima_gs.pbix`. **Não clique em "Atualizar"**: a atualização tenta conectar no Snowflake do autor.
+2. Abra o `wattly.pbix`. **Não clique em "Atualizar"**: a atualização tenta conectar no Snowflake do autor.
 3. Para ver as tabelas geradas pela pipeline, use a **Exibição de tabela** (ícone de tabela, à esquerda).
 
 As evidências da execução (dbt, Snowflake e linhagem) estão no PDF da entrega.
@@ -390,7 +390,7 @@ pip install -r requirements.txt
 como variáveis de ambiente (nenhuma senha fica no repositório).
 
 ```yaml
-dbt_ultima_gs:
+dbt_wattly:
   target: dev
   outputs:
     dev:
@@ -399,8 +399,8 @@ dbt_ultima_gs:
       user: "{{ env_var('SNOWFLAKE_USER') }}"
       password: "{{ env_var('SNOWFLAKE_PASSWORD') }}"
       role: SYSADMIN
-      warehouse: WH_ULTIMA_GS
-      database: ULTIMA_GS
+      warehouse: WH_WATTLY
+      database: WATTLY
       schema: RAW
       threads: 4
 ```
@@ -411,7 +411,7 @@ $env:SNOWFLAKE_USER     = "seu_usuario"
 $env:SNOWFLAKE_PASSWORD = "sua_senha"
 ```
 
-**4. Executar o pipeline** (dentro da pasta `dbt_ultima_gs`):
+**4. Executar o pipeline** (dentro da pasta `dbt_wattly`):
 
 | Comando | Etapa | Resultado esperado |
 |---|---|---|
@@ -421,7 +421,7 @@ $env:SNOWFLAKE_PASSWORD = "sua_senha"
 | `dbt build` | RAW → STG → INT → FINAL + testes | todos os models e testes com `PASS` |
 
 ```powershell
-cd dbt_ultima_gs
+cd dbt_wattly
 dbt debug
 dbt run-operation subir_arquivos_stage
 dbt run-operation copiar_stage_para_raw
@@ -431,12 +431,12 @@ dbt build
 **5. Conferir no Snowflake:**
 
 ```sql
-select count(*) from ultima_gs.final.fato_leituras;   -- 20000
-select count(*) from ultima_gs.final.fato_sessoes;    -- 418
-select count(*) from ultima_gs.final.dim_carregador;  -- 8
+select count(*) from wattly.final.fato_leituras;   -- 20000
+select count(*) from wattly.final.fato_sessoes;    -- 418
+select count(*) from wattly.final.dim_carregador;  -- 8
 ```
 
-**6. (Opcional) Ligar o Power BI ao seu Snowflake:** no `ultima_gs.pbix`, vá em **Transformar dados →
+**6. (Opcional) Ligar o Power BI ao seu Snowflake:** no `wattly.pbix`, vá em **Transformar dados →
 Configurações da fonte de dados → Alterar fonte**, informe o servidor da sua conta
 (`<conta>.snowflakecomputing.com`) e clique em **Atualizar**.
 
@@ -444,8 +444,8 @@ Configurações da fonte de dados → Alterar fonte**, informe o servidor da sua
 
 | Problema | Solução |
 |---|---|
-| `dbt debug` não encontra o perfil | confira se o perfil `dbt_ultima_gs` está em `~/.dbt/profiles.yml` |
+| `dbt debug` não encontra o perfil | confira se o perfil `dbt_wattly` está em `~/.dbt/profiles.yml` |
 | Erro de variável de ambiente | as variáveis `$env:` valem só no terminal aberto; defina de novo em um terminal novo |
-| `PUT` não encontra o arquivo | informe o caminho absoluto: `dbt run-operation subir_arquivos_stage --vars "{pasta_dados: 'C:/caminho/ultima-gs/csv'}"` |
-| Sem permissão para criar o warehouse | troque `WH_ULTIMA_GS` por `COMPUTE_WH` no setup e no perfil |
+| `PUT` não encontra o arquivo | informe o caminho absoluto: `dbt run-operation subir_arquivos_stage --vars "{pasta_dados: 'C:/caminho/wattly/csv'}"` |
+| Sem permissão para criar o warehouse | troque `WH_WATTLY` por `COMPUTE_WH` no setup e no perfil |
 | Mac / Linux | ative o ambiente com `source venv/bin/activate` e defina as variáveis com `export SNOWFLAKE_USER=...` |

@@ -1,5 +1,5 @@
 -- =====================================================================
--- ULTIMA_GS - setup do Snowflake
+-- WATTLY - setup do Snowflake
 -- Cria warehouse, database, schemas das camadas, file format, stage
 -- e as tabelas da camada RAW. Pode ser executado mais de uma vez.
 -- =====================================================================
@@ -9,19 +9,19 @@ use role sysadmin;
 -- ---------------------------------------------------------------------
 -- 1. Warehouse (processamento) - pequeno e com auto-suspend para economizar
 -- ---------------------------------------------------------------------
-create warehouse if not exists wh_ultima_gs
+create warehouse if not exists wh_wattly
     warehouse_size = 'XSMALL'
     auto_suspend   = 60          -- desliga após 60 s sem uso
     auto_resume    = true
     initially_suspended = true;
 
-use warehouse wh_ultima_gs;
+use warehouse wh_wattly;
 
 -- ---------------------------------------------------------------------
 -- 2. Database e schemas (uma camada por schema)
 -- ---------------------------------------------------------------------
-create database if not exists ultima_gs;
-use database ultima_gs;
+create database if not exists wattly;
+use database wattly;
 
 create schema if not exists raw;     -- dado bruto, exatamente como chegou do IoT
 create schema if not exists stg;     -- dado limpo e tipado (dbt)
@@ -98,6 +98,6 @@ comment = 'Cadastro dos carregadores (vem do app)';
 -- ---------------------------------------------------------------------
 -- 6. Conferência
 -- ---------------------------------------------------------------------
-show schemas in database ultima_gs;
-show tables  in schema   ultima_gs.raw;
-show stages  in schema   ultima_gs.raw;
+show schemas in database wattly;
+show tables  in schema   wattly.raw;
+show stages  in schema   wattly.raw;
