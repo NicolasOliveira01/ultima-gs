@@ -2,6 +2,8 @@
 
 Global Solution 2026/2 · CitizenTech
 
+https://github.com/NicolasOliveira01/wattly
+
 ## Ideia do projeto
 
 Plataforma para **donos de carregadores de carro elétrico compartilharem o carregador** com outros
