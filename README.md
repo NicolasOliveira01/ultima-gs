@@ -67,7 +67,7 @@ lógica do código do Arduino**. Na solução real, viriam dos carregadores pela
 | `tarifa_kwh_brl` | preço do kWh cobrado pelo dono (R$) |
 | `data_cadastro` | data em que o carregador entrou na plataforma |
 
-# Caminho do cado
+# Caminho do dado
 
 ## CSV → Stage
 
@@ -78,6 +78,18 @@ enviando seus dados para a nuvem.
 O envio é feito pela macro dbt [`subir_arquivos_stage`](dbt_ultima_gs/macros/subir_arquivos_stage.sql),
 que executa um `PUT` para cada arquivo da pasta `csv/`. Os arquivos são compactados (`.gz`) e, se já
 existirem no stage, substituídos.
+
+**Como funciona no código:**
+
+```sql
+put 'file://../csv/leituras_carregador.csv' @ultima_gs.raw.stage_iot
+    auto_compress = true   -- compacta em .gz antes de enviar
+    overwrite     = true   -- substitui o arquivo se ele já estiver no stage
+```
+
+- Um `for` do Jinja percorre a lista de arquivos e executa um `PUT` para cada um com `run_query`.
+- A pasta vem da variável `pasta_dados` do `dbt_project.yml` (`../csv`).
+- O status de cada envio (`UPLOADED` ou `SKIPPED`) é exibido no terminal com `log`.
 
 ```powershell
 cd dbt_ultima_gs
@@ -102,6 +114,24 @@ como texto) e cada linha recebe duas colunas de auditoria:
 |---|---|
 | `_arquivo` | arquivo de origem da linha |
 | `_carregado_em` | data e hora da carga |
+
+**Como funciona no código:**
+
+```sql
+copy into ultima_gs.raw.leituras_carregador
+from (
+    select $1, $2, ..., $21,     -- colunas do CSV pela posição
+           metadata$filename,    -- vai para _arquivo
+           current_timestamp()   -- vai para _carregado_em
+    from @ultima_gs.raw.stage_iot
+)
+file_format = (format_name = 'ultima_gs.raw.ff_csv')   -- vírgula, cabeçalho, UTF-8
+pattern     = '.*leituras_carregador.*'                -- só o arquivo desta tabela
+```
+
+- `$1 … $21` leem as colunas do CSV na ordem em que aparecem; a tabela RAW tem as mesmas colunas, na mesma ordem.
+- `pattern` separa os arquivos, já que os dois estão no mesmo stage.
+- O resultado de cada carga (arquivo, status e linhas carregadas) é exibido no terminal.
 
 ```powershell
 cd dbt_ultima_gs
@@ -129,6 +159,24 @@ O que muda em relação à RAW:
 - **Sem duplicidade:** se a mesma linha for carregada mais de uma vez, fica só a carga mais recente.
 - **Testes:** `unique` e `not_null` garantem que cada leitura e cada carregador aparecem uma única vez.
 
+**Como funciona no código** (`stg_leituras`):
+
+```sql
+select
+    try_to_number(id_leitura)                                 as id_leitura,
+    try_to_timestamp_ntz(data_hora, 'YYYY-MM-DD HH24:MI:SS')  as data_hora,
+    try_to_decimal(temperatura_c, 5, 1)                       as temperatura_c,
+    upper(trim(estado))                                       as estado,
+    upper(trim(rele)) = 'LIGADO'                              as rele_ligado,
+    ...
+from {{ source('raw', 'leituras_carregador') }}
+qualify row_number() over (partition by id_leitura order by _carregado_em desc) = 1
+```
+
+- `source()` aponta para a tabela RAW declarada em `_sources.yml`; é assim que o dbt monta a linhagem do dado.
+- `qualify row_number() ... = 1` numera as cópias de cada leitura, da carga mais recente para a mais antiga, e mantém só a primeira.
+- O schema `STG` vem do `dbt_project.yml` (`+schema: stg`). A macro `generate_schema_name` faz o dbt usar esse nome exato, em vez de `RAW_STG`.
+
 ```powershell
 cd dbt_ultima_gs
 dbt build --select staging
@@ -153,6 +201,31 @@ Somar a receita direto nas leituras multiplicaria o valor. Agrupando por sessão
 | `temperatura_max_c` / `temperatura_media_c` | temperatura máxima e média do conector na carga |
 | `kwh_excedente` | energia entregue além da paga (o último ciclo passa um pouco do limite) |
 | `status_sessao` | `CONCLUIDA` ou `EM_ANDAMENTO` |
+
+**Como funciona no código:** o model é dividido em 3 etapas (CTEs).
+
+```sql
+-- 1. prepara cada leitura: marca quando a carga ENTRA em pausa
+iff(estado = 'PAUSADO'
+    and coalesce(lag(estado) over (partition by id_sessao order by volta), '') <> 'PAUSADO',
+    1, 0) as inicio_pausa
+
+-- 2. agrupa as leituras em sessões
+select id_sessao,
+       any_value(valor_pago_brl)                            as valor_pago_brl,  -- uma vez por sessão
+       sum(iff(estado = 'REDUZIDO', minutos_intervalo, 0))  as minutos_reduzido,
+       sum(inicio_pausa)                                    as qtd_pausas
+from leituras_preparadas
+group by id_sessao
+
+-- 3. métricas derivadas
+div0(minutos_reduzido + minutos_pausado, duracao_min) as pct_tempo_alerta
+```
+
+- `minutos_intervalo = intervalo_ms × 360 ÷ 60.000` converte o tempo real em minutos de carga simulados (variável `aceleracao`).
+- `lag()` olha a leitura anterior da mesma sessão: 3 leituras seguidas em PAUSADO contam como **1** pausa.
+- `div0` evita erro de divisão por zero.
+- `ref('stg_leituras')` cria a dependência: o dbt sempre executa a STG antes da INT.
 
 ```powershell
 cd dbt_ultima_gs
@@ -195,7 +268,77 @@ para o dashboard consultar mais rápido.
 - A `dim_data` traz nome do mês, dia da semana e indicador de fim de semana em português.
 - **Testes** garantem chaves únicas e que todo carregador, data e sessão das fatos existe na tabela relacionada.
 
+**Como funciona no código:**
+
+```sql
+-- dim_data: gera um dia por linha, da primeira à última leitura
+with sequencia as (
+    select row_number() over (order by seq4()) - 1 as n   -- 0, 1, 2, ...
+    from table(generator(rowcount => 3660))
+)
+select dateadd(day, n, data_inicio) as data
+from sequencia, limites
+where dateadd(day, n, data_inicio) <= data_fim
+```
+
+- As fatos e a `dim_carregador` selecionam colunas das camadas anteriores; `data_hora::date` cria a coluna `data`, que liga as fatos ao calendário.
+- A `dim_data` não vem do CSV: o `generator` cria uma sequência de números que é somada à primeira data. Assim o calendário não tem dias faltando, o que é necessário para funções de tempo no DAX.
+- `+materialized: table` (no `dbt_project.yml`) cria tabelas físicas: o cálculo é feito uma vez, no `dbt build`, e o Power BI só lê o resultado.
+- Os testes `relationships` (em `_final_models.yml`) conferem que toda chave das fatos existe na dimensão correspondente.
+
 ```powershell
 cd dbt_ultima_gs
 dbt build --select final
 ```
+
+## Como executar
+
+**Pré-requisitos:** Python 3.10+ e uma conta Snowflake.
+
+**1. Criar a estrutura no Snowflake:** execute [`2-big-data/snowflake/01_setup.sql`](2-big-data/snowflake/01_setup.sql)
+numa worksheet (Run All).
+
+**2. Instalar o dbt** (PowerShell, na raiz do repositório):
+
+```powershell
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+```
+
+**3. Configurar a conexão:** adicione o perfil abaixo em `~/.dbt/profiles.yml` e defina as credenciais
+como variáveis de ambiente (nenhuma senha fica no repositório).
+
+```yaml
+dbt_ultima_gs:
+  target: dev
+  outputs:
+    dev:
+      type: snowflake
+      account: "{{ env_var('SNOWFLAKE_ACCOUNT') }}"
+      user: "{{ env_var('SNOWFLAKE_USER') }}"
+      password: "{{ env_var('SNOWFLAKE_PASSWORD') }}"
+      role: SYSADMIN
+      warehouse: WH_ULTIMA_GS
+      database: ULTIMA_GS
+      schema: RAW
+      threads: 4
+```
+
+```powershell
+$env:SNOWFLAKE_ACCOUNT  = "seu_identificador"
+$env:SNOWFLAKE_USER     = "seu_usuario"
+$env:SNOWFLAKE_PASSWORD = "sua_senha"
+```
+
+**4. Executar o pipeline** (dentro da pasta `dbt_ultima_gs`):
+
+```powershell
+cd dbt_ultima_gs
+dbt debug                                # testa a conexão
+dbt run-operation subir_arquivos_stage   # CSV → Stage
+dbt run-operation copiar_stage_para_raw  # Stage → RAW
+dbt build                                # RAW → STG → INT → FINAL + testes
+```
+
+Ao final, as tabelas do schema `ULTIMA_GS.FINAL` estão prontas para o Power BI.
