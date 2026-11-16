@@ -357,10 +357,26 @@ agrupar a temperatura por semana.
 
 # Como executar
 
-**Pré-requisitos:** Python 3.10+ e uma conta Snowflake.
+Há duas formas de avaliar esta área. A **opção A** não precisa de instalação além do Power BI; a
+**opção B** executa a pipeline completa.
+
+## Opção A · Ver o resultado sem Snowflake
+
+O arquivo [`ultima_gs.pbix`](ultima_gs.pbix) contém os dados da camada FINAL (modo **Importar**).
+
+1. Instale o **Power BI Desktop** (gratuito, na Microsoft Store).
+2. Abra o `ultima_gs.pbix`. **Não clique em "Atualizar"**: a atualização tenta conectar no Snowflake do autor.
+3. Para ver as tabelas geradas pela pipeline, use a **Exibição de tabela** (ícone de tabela, à esquerda).
+
+As evidências da execução (dbt, Snowflake e linhagem) estão no PDF da entrega.
+
+## Opção B · Executar a pipeline completa
+
+**Pré-requisitos:** Python 3.10+ e uma conta Snowflake (a conta de avaliação gratuita atende).
 
 **1. Criar a estrutura no Snowflake:** execute [`2-big-data/snowflake/01_setup.sql`](2-big-data/snowflake/01_setup.sql)
-numa worksheet (Run All).
+numa worksheet (Run All). Ao final, os comandos `show` listam os schemas RAW, STG, INT e FINAL, o stage
+e as 2 tabelas RAW.
 
 **2. Instalar o dbt** (PowerShell, na raiz do repositório):
 
@@ -390,19 +406,46 @@ dbt_ultima_gs:
 ```
 
 ```powershell
-$env:SNOWFLAKE_ACCOUNT  = "seu_identificador"
+$env:SNOWFLAKE_ACCOUNT  = "seu_identificador"   # ex.: orgname-accountname
 $env:SNOWFLAKE_USER     = "seu_usuario"
 $env:SNOWFLAKE_PASSWORD = "sua_senha"
 ```
 
 **4. Executar o pipeline** (dentro da pasta `dbt_ultima_gs`):
 
+| Comando | Etapa | Resultado esperado |
+|---|---|---|
+| `dbt debug` | testa a conexão | `All checks passed!` |
+| `dbt run-operation subir_arquivos_stage` | CSV → Stage | os 2 arquivos com status `UPLOADED` |
+| `dbt run-operation copiar_stage_para_raw` | Stage → RAW | `LOADED`: 20.000 leituras e 8 carregadores |
+| `dbt build` | RAW → STG → INT → FINAL + testes | todos os models e testes com `PASS` |
+
 ```powershell
 cd dbt_ultima_gs
-dbt debug                                # testa a conexão
-dbt run-operation subir_arquivos_stage   # CSV → Stage
-dbt run-operation copiar_stage_para_raw  # Stage → RAW
-dbt build                                # RAW → STG → INT → FINAL + testes
+dbt debug
+dbt run-operation subir_arquivos_stage
+dbt run-operation copiar_stage_para_raw
+dbt build
 ```
 
-Ao final, as tabelas do schema `ULTIMA_GS.FINAL` estão prontas para o Power BI.
+**5. Conferir no Snowflake:**
+
+```sql
+select count(*) from ultima_gs.final.fato_leituras;   -- 20000
+select count(*) from ultima_gs.final.fato_sessoes;    -- 418
+select count(*) from ultima_gs.final.dim_carregador;  -- 8
+```
+
+**6. (Opcional) Ligar o Power BI ao seu Snowflake:** no `ultima_gs.pbix`, vá em **Transformar dados →
+Configurações da fonte de dados → Alterar fonte**, informe o servidor da sua conta
+(`<conta>.snowflakecomputing.com`) e clique em **Atualizar**.
+
+### Problemas comuns
+
+| Problema | Solução |
+|---|---|
+| `dbt debug` não encontra o perfil | confira se o perfil `dbt_ultima_gs` está em `~/.dbt/profiles.yml` |
+| Erro de variável de ambiente | as variáveis `$env:` valem só no terminal aberto; defina de novo em um terminal novo |
+| `PUT` não encontra o arquivo | informe o caminho absoluto: `dbt run-operation subir_arquivos_stage --vars "{pasta_dados: 'C:/caminho/ultima-gs/csv'}"` |
+| Sem permissão para criar o warehouse | troque `WH_ULTIMA_GS` por `COMPUTE_WH` no setup e no perfil |
+| Mac / Linux | ative o ambiente com `source venv/bin/activate` e defina as variáveis com `export SNOWFLAKE_USER=...` |
